@@ -2,9 +2,11 @@ package rule
 
 import (
 	"net/netip"
+	"slices"
 	"strings"
 
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing/common"
 	E "github.com/sagernet/sing/common/exceptions"
 
 	"go4.org/netipx"
@@ -76,16 +78,20 @@ func (r *IPCIDRItem) Match(metadata *adapter.InboundContext) bool {
 	if r.isSource || metadata.IPCIDRMatchSource {
 		return r.ipSet.Contains(metadata.Source.Addr)
 	}
+	if metadata.DestinationAddressMatchFromResponse {
+		addresses := metadata.DNSResponseAddressesForMatch()
+		if len(addresses) == 0 {
+			// Legacy rule_set_ip_cidr_accept_empty only applies when the DNS response
+			// does not expose any address answers for matching.
+			return metadata.IPCIDRAcceptEmpty
+		}
+		return slices.ContainsFunc(addresses, r.ipSet.Contains)
+	}
 	if metadata.Destination.IsIP() {
 		return r.ipSet.Contains(metadata.Destination.Addr)
 	}
 	if len(metadata.DestinationAddresses) > 0 {
-		for _, address := range metadata.DestinationAddresses {
-			if r.ipSet.Contains(address) {
-				return true
-			}
-		}
-		return false
+		return common.Any(metadata.DestinationAddresses, r.ipSet.Contains)
 	}
 	return metadata.IPCIDRAcceptEmpty
 }

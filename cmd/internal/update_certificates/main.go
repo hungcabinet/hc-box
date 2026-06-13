@@ -43,13 +43,8 @@ func updateMozillaIncludedRootCAs() error {
 
 package certificate
 
-import "crypto/x509"
-
-var mozillaIncluded *x509.CertPool
-
-func init() {
-	mozillaIncluded = x509.NewCertPool()
-`)
+func mozillaIncludedPEM() string {
+	return ` + "`")
 	for {
 		record, err := reader.Read()
 		if err == io.EOF {
@@ -60,17 +55,14 @@ func init() {
 		if record[geoIndex] == "China" {
 			continue
 		}
-		generated.WriteString("\n	// ")
+		cert := strings.Trim(record[certIndex], "'")
+		generated.WriteString("\n// ")
 		generated.WriteString(record[nameIndex])
 		generated.WriteString("\n")
-		generated.WriteString("	mozillaIncluded.AppendCertsFromPEM([]byte(`")
-		cert := record[certIndex]
-		// Remove single quotes
-		cert = cert[1 : len(cert)-1]
 		generated.WriteString(cert)
-		generated.WriteString("`))\n")
+		generated.WriteString("\n")
 	}
-	generated.WriteString("}\n")
+	generated.WriteString("`\n}\n")
 	return os.WriteFile("common/certificate/mozilla.go", []byte(generated.String()), 0o644)
 }
 
@@ -129,13 +121,8 @@ func updateChromeIncludedRootCAs() error {
 
 package certificate
 
-import "crypto/x509"
-
-var chromeIncluded *x509.CertPool
-
-func init() {
-	chromeIncluded = x509.NewCertPool()
-`)
+func chromeIncludedPEM() string {
+	return ` + "`")
 	for {
 		record, err := reader.Read()
 		if err == io.EOF {
@@ -149,18 +136,13 @@ func init() {
 		if chinaFingerprints[record[fingerprintIndex]] {
 			continue
 		}
-		generated.WriteString("\n	// ")
+		cert := strings.Trim(record[certIndex], "'")
+		generated.WriteString("\n// ")
 		generated.WriteString(record[subjectIndex])
 		generated.WriteString("\n")
-		generated.WriteString("	chromeIncluded.AppendCertsFromPEM([]byte(`")
-		cert := record[certIndex]
-		// Remove single quotes if present
-		if len(cert) > 0 && cert[0] == '\'' {
-			cert = cert[1 : len(cert)-1]
-		}
 		generated.WriteString(cert)
-		generated.WriteString("`))\n")
+		generated.WriteString("\n")
 	}
-	generated.WriteString("}\n")
+	generated.WriteString("`\n}\n")
 	return os.WriteFile("common/certificate/chrome.go", []byte(generated.String()), 0o644)
 }
