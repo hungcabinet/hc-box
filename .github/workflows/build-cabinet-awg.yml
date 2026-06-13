@@ -16,6 +16,11 @@ on:
           - All
           - Binary
           - Android
+      prerelease:
+        description: "Mark as pre-release"
+        required: false
+        type: boolean
+        default: false
   push:
     branches:
       - stable
@@ -40,7 +45,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: ~1.25.9
+          go-version: ~1.25.10
       - name: Vendor dependencies and apply patches
         run: |
           go mod vendor
@@ -126,7 +131,7 @@ jobs:
         if: ${{ ! matrix.legacy_win7 }}
         uses: actions/setup-go@v5
         with:
-          go-version: ~1.25.9
+          go-version: ~1.25.10
       - name: Cache Go for Windows 7
         if: matrix.legacy_win7
         id: cache-go-for-windows7
@@ -514,7 +519,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: ~1.25.9
+          go-version: ~1.25.10
       - name: Setup Android NDK
         id: setup-ndk
         uses: nttld/setup-ndk@v1
@@ -574,6 +579,7 @@ jobs:
 
   release:
     name: Create Release
+    if: ${{ !failure() && github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     needs:
       - build
@@ -581,7 +587,7 @@ jobs:
       - build_android
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           path: dist
           merge-multiple: true
@@ -597,7 +603,7 @@ jobs:
 
           # Create release notes
           cat > notes.md << 'EOF'
-          ## sing-box with AWG 2.0 support
+          ## hc-box (sing-box fork with AWG 2.0 and mieru support)
           EOF
 
           # Create release
