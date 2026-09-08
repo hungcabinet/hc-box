@@ -9,7 +9,7 @@ This fork is made for personal purposes only! It just adds support for some addi
 ## Features
 
 - Full sing-box functionality
-- AmneziaWG protocol support via [amneziawg-go](https://github.com/amnezia-vpn/amneziawg-go)
+- AmneziaWG 3.1 support via [amneziawg-go](https://github.com/hoaxisr/amneziawg-go)
 - Mieru protocol support via [mieru](https://github.com/enfein/mbox)
 
 ## Build

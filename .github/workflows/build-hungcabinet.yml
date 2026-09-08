@@ -763,7 +763,7 @@ jobs:
           gh release delete "${VERSION}" --yes --repo ${{ github.repository }} 2>/dev/null || true
 
           cat > notes.md << 'EOF'
-          ## hc-box (sing-box fork with AWG and mieru support)
+          ## hc-box (sing-box fork with AWG 3.1 and mieru support)
           EOF
 
           PRERELEASE_FLAG=""
