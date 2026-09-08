@@ -702,11 +702,6 @@ jobs:
         with:
           cache-provider: basic
       - name: Update version
-        if: github.event_name == 'workflow_dispatch'
-        run: |-
-          go run -v ./cmd/internal/update_android_version --ci
-      - name: Update nightly version
-        if: github.event_name != 'workflow_dispatch'
         run: |-
           go run -v ./cmd/internal/update_android_version --ci --nightly
       - name: Build
