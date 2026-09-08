@@ -6,7 +6,7 @@ import (
 	"net/netip"
 	"os"
 
-	awgTun "github.com/amnezia-vpn/amneziawg-go/tun"
+	awgTun "github.com/amnezia-vpn/amneziawg-go/v3/tun"
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/common/dialer"
@@ -31,10 +31,15 @@ type systemTun struct {
 func newSystemTun(ctx context.Context, address []netip.Prefix, allowedIps []netip.Prefix, excludedIps []netip.Prefix, mtu uint32, logger logger.Logger) (tunAdapter, error) {
 	networkManager := service.FromContext[adapter.NetworkManager](ctx)
 	name := tun.CalculateInterfaceName("")
-	events := make(chan awgTun.Event)
+	// Buffered so Start can push EventUp before the AWG device's event reader
+	// exists: the device is now created after the tun is started (see
+	// Device.Start), so an unbuffered send here would deadlock.
+	events := make(chan awgTun.Event, 1)
 
 	dial, err := dialer.NewDefault(ctx, option.DialerOptions{
-		BindInterface: name,
+		AbstractDialerOptions: option.AbstractDialerOptions{
+			BindInterface: name,
+		},
 	})
 	if err != nil {
 		return nil, exceptions.Cause(err, "get in-tunnel dialer")
@@ -44,6 +49,9 @@ func newSystemTun(ctx context.Context, address []netip.Prefix, allowedIps []neti
 		Name: name,
 		GSO:  true,
 		MTU:  uint32(mtu),
+		// The default DNS mode is hijack; this is a transport interface, not the
+		// system tun, so it must not touch DNS (mirrors transport/wireguard).
+		DNSMode: tun.DNSModeDisabled,
 		Inet4Address: common.Filter(address, func(it netip.Prefix) bool {
 			return it.Addr().Is4()
 		}),

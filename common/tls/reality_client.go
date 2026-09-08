@@ -52,11 +52,18 @@ type RealityClientConfig struct {
 }
 
 func NewRealityClient(ctx context.Context, logger logger.ContextLogger, serverAddress string, options option.OutboundTLSOptions) (Config, error) {
+	return newRealityClient(ctx, logger, serverAddress, options, false)
+}
+
+func newRealityClient(ctx context.Context, logger logger.ContextLogger, serverAddress string, options option.OutboundTLSOptions, allowEmptyServerName bool) (Config, error) {
 	if options.UTLS == nil || !options.UTLS.Enabled {
 		return nil, E.New("uTLS is required by reality client")
 	}
+	if options.Spoof != "" || options.SpoofMethod != "" {
+		return nil, E.New("spoof is unsupported in reality")
+	}
 
-	uClient, err := NewUTLSClient(ctx, logger, serverAddress, options)
+	uClient, err := newUTLSClient(ctx, logger, serverAddress, options, allowEmptyServerName)
 	if err != nil {
 		return nil, err
 	}
@@ -106,6 +113,14 @@ func (e *RealityClientConfig) NextProtos() []string {
 
 func (e *RealityClientConfig) SetNextProtos(nextProto []string) {
 	e.uClient.SetNextProtos(nextProto)
+}
+
+func (e *RealityClientConfig) HandshakeTimeout() time.Duration {
+	return e.uClient.HandshakeTimeout()
+}
+
+func (e *RealityClientConfig) SetHandshakeTimeout(timeout time.Duration) {
+	e.uClient.SetHandshakeTimeout(timeout)
 }
 
 func (e *RealityClientConfig) STDConfig() (*STDConfig, error) {
@@ -168,9 +183,15 @@ func (e *RealityClientConfig) ClientHandshake(ctx context.Context, conn net.Conn
 	}
 	binary.BigEndian.PutUint64(hello.SessionId, uint64(nowTime.Unix()))
 
-	hello.SessionId[0] = 1
-	hello.SessionId[1] = 8
-	hello.SessionId[2] = 1
+	// Версия клиента, которую сервер REALITY читает из SessionId и сверяет с
+	// Min/MaxClientVer. При пустом minClientVer xray-core подставляет свой
+	// встроенный минимум 26.3.27 (infra/conf/transport_security.go), поэтому
+	// прежние 1.8.1 уходили в fallback у всех, кто обновил ядро; 3x-ui 3.5.0
+	// бандлит как раз xray 26.7.11. Апстрим sing-box значение не поднимал —
+	// при ребейзе правку сохранить.
+	hello.SessionId[0] = 26
+	hello.SessionId[1] = 7
+	hello.SessionId[2] = 11
 	binary.BigEndian.PutUint32(hello.SessionId[4:], uint32(time.Now().Unix()))
 	copy(hello.SessionId[8:], e.shortID[:])
 	if debug.Enabled {
