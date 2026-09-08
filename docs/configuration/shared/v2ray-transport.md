@@ -16,6 +16,7 @@ Available transports:
 * QUIC
 * gRPC
 * HTTPUpgrade
+* XHTTP
 
 !!! warning "Difference from v2ray-core"
 
@@ -227,3 +228,80 @@ The server will verify.
 Extra headers of HTTP request.
 
 The server will write in response if not empty.
+
+### XHTTP
+
+HTTP-based multiplexed transport used by Xray (also called SplitHTTP). Typical with VLESS; do not set `flow` to `xtls-rprx-vision`.
+
+```json
+{
+  "type": "xhttp",
+  "mode": "auto",
+  "host": "",
+  "path": "/",
+  "headers": {},
+  "x_padding_bytes": "100-1000",
+  "xmux": {
+    "max_concurrency": "1-1",
+    "h_max_request_times": "600-900",
+    "h_max_reusable_secs": "1800-3000"
+  },
+  "download": {
+    "server": "",
+    "server_port": 443,
+    "path": "/",
+    "tls": {}
+  }
+}
+```
+
+`download` is optional: a separate downlink (host, path, TLS, or `detour`). Omit it for a single connection.
+
+Ranges are a number, `"min-max"`, or `{"from":0,"to":0}`.
+
+#### mode
+
+Upload mode. `auto` is used when omitted.
+
+| Value | Meaning |
+|-------|---------|
+| `auto` | Client/server pick a compatible mode |
+| `packet-up` | Uplink as sequenced HTTP requests |
+| `stream-up` | Streaming uplink |
+| `stream-one` | Single bidirectional stream |
+
+#### host
+
+Host header. Do not put `Host` in `headers`.
+
+#### path
+
+HTTP path. A trailing `/` is added if missing.
+
+#### headers
+
+Extra request headers.
+
+#### x_padding_bytes
+
+==Required==
+
+Padding length range. Cannot be `0` or omitted. Default-like value: `"100-1000"`.
+
+#### xmux
+
+HTTP connection reuse. If omitted: concurrency `1-1`, `h_max_request_times` `600-900`, `h_max_reusable_secs` `1800-3000`.
+
+Do not set `max_connections` together with `max_concurrency`.
+
+#### download
+
+Optional split downlink: `server`, `server_port`, `tls`, `detour`, plus the same base fields as above.
+
+#### packet-up extras
+
+`uplink_http_method` (`POST` by default; `GET` only in `packet-up`). `uplink_data_placement` `cookie`/`header` only in `packet-up`. `sc_max_each_post_bytes`, `sc_min_posts_interval_ms`, `sc_max_buffered_posts`, `uplink_chunk_size`.
+
+#### padding extras
+
+`x_padding_placement`: `queryInHeader` (default), `cookie`, `header`, `query`. `x_padding_method`: `repeat-x` (default), `tokenish`. `x_padding_key` / `x_padding_header` (defaults `x_padding` / `X-Padding`). `session_placement` / `seq_placement`: `path` (default), `cookie`, `header`, `query`.

@@ -15,6 +15,7 @@ V2Ray Transport 是 v2ray 发明的一组私有协议，并污染了其他协议
 * QUIC
 * gRPC
 * HTTPUpgrade
+* XHTTP
 
 !!! warning "与 v2ray-core 的区别"
 
@@ -216,3 +217,80 @@ HTTP 请求路径
 HTTP 请求的额外标头。
 
 如果设置，服务器将写入响应。
+
+### XHTTP
+
+Xray 的 HTTP 多路复用传输（SplitHTTP）。通常与 VLESS 一起使用；不要设置 `flow` 为 `xtls-rprx-vision`。
+
+```json
+{
+  "type": "xhttp",
+  "mode": "auto",
+  "host": "",
+  "path": "/",
+  "headers": {},
+  "x_padding_bytes": "100-1000",
+  "xmux": {
+    "max_concurrency": "1-1",
+    "h_max_request_times": "600-900",
+    "h_max_reusable_secs": "1800-3000"
+  },
+  "download": {
+    "server": "",
+    "server_port": 443,
+    "path": "/",
+    "tls": {}
+  }
+}
+```
+
+`download` 可选：单独的下行（主机、路径、TLS 或 `detour`）。单连接时省略。
+
+范围可以是数字、`"min-max"` 或 `{"from":0,"to":0}`。
+
+#### mode
+
+上传模式。省略时为 `auto`。
+
+| 值 | 含义 |
+|-------|---------|
+| `auto` | 客户端/服务端选择兼容模式 |
+| `packet-up` | 上行拆成带序号的 HTTP 请求 |
+| `stream-up` | 流式上行 |
+| `stream-one` | 单条双向流 |
+
+#### host
+
+Host 头。不要把 `Host` 放进 `headers`。
+
+#### path
+
+HTTP 路径。若缺少末尾 `/` 会自动补上。
+
+#### headers
+
+额外请求头。
+
+#### x_padding_bytes
+
+==Required==
+
+填充长度范围。不能为 `0` 或省略。常用值：`"100-1000"`。
+
+#### xmux
+
+HTTP 连接复用。省略时：concurrency `1-1`，`h_max_request_times` `600-900`，`h_max_reusable_secs` `1800-3000`。
+
+不要同时设置 `max_connections` 和 `max_concurrency`。
+
+#### download
+
+可选的分离下行：`server`、`server_port`、`tls`、`detour`，以及与上行相同的基础字段。
+
+#### packet-up extras
+
+`uplink_http_method`（默认 `POST`；`GET` 仅限 `packet-up`）。`uplink_data_placement` 为 `cookie`/`header` 时仅限 `packet-up`。`sc_max_each_post_bytes`、`sc_min_posts_interval_ms`、`sc_max_buffered_posts`、`uplink_chunk_size`。
+
+#### padding extras
+
+`x_padding_placement`：`queryInHeader`（默认）、`cookie`、`header`、`query`。`x_padding_method`：`repeat-x`（默认）、`tokenish`。`x_padding_key` / `x_padding_header`（默认 `x_padding` / `X-Padding`）。`session_placement` / `seq_placement`：`path`（默认）、`cookie`、`header`、`query`。
