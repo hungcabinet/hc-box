@@ -414,7 +414,18 @@ jobs:
       - name: Install apk-tools
         if: matrix.openwrt != '' || matrix.alpine != ''
         run: |-
-          docker run --rm -v /usr/local/bin:/mnt alpine:edge sh -c "apk add --no-cache apk-tools-static && cp /sbin/apk.static /mnt/apk && chmod +x /mnt/apk"
+          set -euo pipefail
+          # Docker Hub/CloudFront resets on GHA; GCR mirror is more reliable.
+          image="mirror.gcr.io/library/alpine:edge"
+          for i in 1 2 3 4 5; do
+            if docker run --rm -v /usr/local/bin:/mnt "$image" sh -c \
+              "apk add --no-cache apk-tools-static && cp /sbin/apk.static /mnt/apk && chmod +x /mnt/apk"; then
+              exit 0
+            fi
+            echo "apk-tools install failed (attempt $i), retrying..."
+            sleep $((i * 8))
+          done
+          exit 1
       - name: Package OpenWrt APK
         if: matrix.openwrt != ''
         run: |-
