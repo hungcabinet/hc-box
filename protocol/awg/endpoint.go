@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"net"
 	"net/netip"
+	"time"
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/adapter/endpoint"
@@ -14,6 +15,7 @@ import (
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/transport/awg"
+	"github.com/sagernet/sing-tun"
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/bufio"
 	E "github.com/sagernet/sing/common/exceptions"
@@ -25,6 +27,13 @@ import (
 	"go4.org/netipx"
 )
 
+var (
+	_ adapter.FlowOutbound                = (*Endpoint)(nil)
+	_ adapter.OutboundWithPreferredRoutes = (*Endpoint)(nil)
+	_ dialer.PacketDialerWithDestination  = (*Endpoint)(nil)
+	_ tun.Handler                         = (*Endpoint)(nil)
+)
+
 func RegisterEndpoint(registry *endpoint.Registry) {
 	endpoint.Register(registry, constant.TypeAwg, NewEndpoint)
 }
@@ -32,6 +41,7 @@ func RegisterEndpoint(registry *endpoint.Registry) {
 type Endpoint struct {
 	*awg.Device
 	endpoint.Adapter
+	ctx       context.Context
 	address   []netip.Prefix
 	router    adapter.Router
 	logger    log.ContextLogger
@@ -83,14 +93,22 @@ func NewEndpoint(ctx context.Context, router adapter.Router, logger log.ContextL
 	// Always use system resolver for peer endpoints because:
 	// 1. VPN server must be resolved before VPN tunnel is established
 	// 2. dnsRouter may not be fully initialized at this stage
-	var resolvePeer func(domain string) (netip.Addr, error)
+	var resolvePeer func(domain string) ([]netip.Addr, error)
 	if remoteIsDomain {
-		resolvePeer = func(domain string) (netip.Addr, error) {
-			addrs, lookupErr := net.DefaultResolver.LookupNetIP(ctx, "ip", domain)
+		resolvePeer = func(domain string) ([]netip.Addr, error) {
+			// Резолв стартового эндпоинта не должен задерживать старт: он
+			// синхронный, идёт по всем доменным пирам подряд, а молчащий (а не
+			// отвергающий) DNS даёт полный таймаут резолвера на каждого. Сверху
+			// awg-manager ждёт готовности не дольше минуты и по таймауту убивает
+			// живой процесс, тратя попытку автоперезапуска. Не разрешилось за
+			// 3 с — поднимаемся без endpoint=, дальше дело DomainPeers.Resolve.
+			lookupCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+			defer cancel()
+			addrs, lookupErr := net.DefaultResolver.LookupNetIP(lookupCtx, "ip", domain)
 			if lookupErr != nil {
-				return netip.Addr{}, lookupErr
+				logger.Warn("не удалось разрешить адрес пира ", domain, ": ", lookupErr)
 			}
-			return addrs[0], nil
+			return addrs, lookupErr
 		}
 	}
 
@@ -99,30 +117,66 @@ func NewEndpoint(ctx context.Context, router adapter.Router, logger log.ContextL
 		return nil, err
 	}
 
+	// The IPC config above pins whatever the domain resolved to right now;
+	// these resolvers re-run on every handshake initiation, so a server that
+	// moved (DDNS) or answers with several addresses is still reached.
+	var domainPeers []awg.DomainPeer
+	for _, peer := range options.Peers {
+		if peer.Address == "" || peer.Port == 0 || M.ParseAddr(peer.Address).IsValid() {
+			continue
+		}
+		publicKeyBytes, decodeErr := base64.StdEncoding.DecodeString(peer.PublicKey)
+		if decodeErr != nil {
+			return nil, decodeErr
+		}
+		domain := peer.Address
+		domainPeers = append(domainPeers, awg.DomainPeer{
+			Domain:       domain,
+			PublicKeyHex: hex.EncodeToString(publicKeyBytes),
+			Port:         peer.Port,
+			Resolve: func() ([]netip.Addr, error) {
+				return resolvePeer(domain)
+			},
+		})
+	}
+
 	logger.Debug("AWG IPC config:\n", ipc)
+
+	// The endpoint is created before the device so it can be passed as the
+	// gVisor forwarder Handler: inbound connections from the tunnel to
+	// arbitrary destinations are routed via Endpoint.NewConnectionEx /
+	// NewPacketConnectionEx (gateway/exit role). Mirrors transport/wireguard.
+	ep := &Endpoint{
+		Adapter:   endpoint.NewAdapterWithDialerOptions("awg", tag, []string{N.NetworkTCP, N.NetworkUDP}, options.DialerOptions),
+		ctx:       ctx,
+		address:   options.Address,
+		router:    router,
+		logger:    logger,
+		dnsRouter: service.FromContext[adapter.DNSRouter](ctx),
+	}
 
 	dev, err := awg.NewDevice(ctx, logger, dial, ipc, awg.DeviceOpts{
 		UseIntegratedTun: options.UseIntegratedTun,
 		Address:          options.Address,
 		AllowedIps:       allowedIps.Prefixes(),
 		ExcludedIps:      excludedIps.Prefixes(),
+		DomainPeers:      domainPeers,
 		MTU:              options.MTU,
+		Handler:          ep,
+		UDPTimeout:       constant.UDPTimeout,
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	return &Endpoint{
-		Device:    dev,
-		Adapter:   endpoint.NewAdapterWithDialerOptions("awg", tag, []string{N.NetworkTCP, N.NetworkUDP}, options.DialerOptions),
-		address:   options.Address,
-		router:    router,
-		logger:    logger,
-		dnsRouter: service.FromContext[adapter.DNSRouter](ctx),
-	}, nil
+	ep.Device = dev
+	return ep, nil
 }
 
-func genIpcConfig(opts option.AwgEndpointOptions, resolvePeer func(domain string) (netip.Addr, error)) (string, error) {
+func genIpcConfig(opts option.AwgEndpointOptions, resolvePeer func(domain string) ([]netip.Addr, error)) (string, error) {
+	if opts.PrivateKey == "" {
+		return "", E.New("missing private key")
+	}
 	privateKeyBytes, err := base64.StdEncoding.DecodeString(opts.PrivateKey)
 	if err != nil {
 		return "", err
@@ -180,6 +234,45 @@ func genIpcConfig(opts option.AwgEndpointOptions, resolvePeer func(domain string
 		s += "\ni5=" + opts.I5
 	}
 
+	if opts.HeaderProtectionKey != "" {
+		for i, padding := range []int{opts.S1, opts.S2, opts.S3, opts.S4} {
+			if padding < 12 {
+				return "", E.New("s", i+1, " must be at least 12 when header_protection_key is set")
+			}
+		}
+		headerProtectionKeyBytes, err := base64.StdEncoding.DecodeString(opts.HeaderProtectionKey)
+		if err != nil {
+			return "", err
+		}
+		s += "\nheader_protection_key=" + hex.EncodeToString(headerProtectionKeyBytes)
+	}
+	if opts.ContentPaddingAddition != "" {
+		s += "\ncontent_padding_addition=" + opts.ContentPaddingAddition
+	}
+	if opts.RekeyAfterTime != "" {
+		s += "\nrekey_after_time=" + opts.RekeyAfterTime
+	}
+	if opts.RekeyTimeout != "" {
+		s += "\nrekey_timeout=" + opts.RekeyTimeout
+	}
+	if opts.RejectAfterTime != "" {
+		s += "\nreject_after_time=" + opts.RejectAfterTime
+	}
+	if opts.KeepaliveTimeout != "" {
+		s += "\nkeepalive_timeout=" + opts.KeepaliveTimeout
+	}
+	if opts.MaxHandshakeAttempts != "" {
+		s += "\nmax_handshake_attempts=" + opts.MaxHandshakeAttempts
+	}
+	// Device-scoped, so they have to stay above the first public_key= line:
+	// everything below it is parsed as a peer field.
+	if opts.RandomTrailers {
+		s += "\nrandom_trailers=true"
+	}
+	if opts.DisableCookies {
+		s += "\ndisable_cookies=true"
+	}
+
 	for _, peer := range opts.Peers {
 		publicKeyBytes, err := base64.StdEncoding.DecodeString(peer.PublicKey)
 		if err != nil {
@@ -194,23 +287,26 @@ func genIpcConfig(opts option.AwgEndpointOptions, resolvePeer func(domain string
 			s += "\npreshared_key=" + hex.EncodeToString(presharedKeyBytes)
 		}
 		if peer.Address != "" && peer.Port != 0 {
-			// Resolve domain to IP if necessary
-			endpointAddr := peer.Address
-			if addr := M.ParseAddr(peer.Address); !addr.IsValid() {
-				// It's a domain, resolve it
-				if resolvePeer == nil {
-					return "", E.New("peer address is a domain but no resolver provided: ", peer.Address)
+			// Стартовый endpoint не обязателен: доменного пира поднимет
+			// DomainPeers.Resolve на первой инициации хендшейка. Фатальный отказ
+			// здесь оставлял туннель лежать до 15 минут после ребута, пока не
+			// поднялся DNS, хотя апстримный wireguard в тех же условиях стартует.
+			endpointAddr := ""
+			if addr := M.ParseAddr(peer.Address); addr.IsValid() {
+				endpointAddr = peer.Address
+			} else if resolvePeer != nil {
+				if resolved, resolveErr := resolvePeer(peer.Address); resolveErr == nil && len(resolved) > 0 {
+					endpointAddr = resolved[0].String()
 				}
-				resolvedAddr, resolveErr := resolvePeer(peer.Address)
-				if resolveErr != nil {
-					return "", E.Cause(resolveErr, "resolve peer endpoint ", peer.Address)
-				}
-				endpointAddr = resolvedAddr.String()
 			}
-			s += "\nendpoint=" + endpointAddr + ":" + format.ToString(peer.Port)
+			if endpointAddr != "" {
+				// net.JoinHostPort оборачивает IPv6-литерал в скобки ([::1]:port);
+				// без этого endpoint=::1:51820 — невалидный UAPI-адрес для wireguard-go.
+				s += "\nendpoint=" + net.JoinHostPort(endpointAddr, format.ToString(peer.Port))
+			}
 		}
-		if peer.PersistentKeepaliveInterval != 0 {
-			s += "\npersistent_keepalive_interval=" + format.ToString(peer.PersistentKeepaliveInterval)
+		if peer.PersistentKeepaliveInterval != "" && peer.PersistentKeepaliveInterval != "0" {
+			s += "\npersistent_keepalive_interval=" + string(peer.PersistentKeepaliveInterval)
 		}
 		for _, allowedIp := range peer.AllowedIPs {
 			s += "\nallowed_ip=" + allowedIp.String()
@@ -296,4 +392,60 @@ func (w *Endpoint) NewConnectionEx(ctx context.Context, conn net.Conn, source M.
 	w.logger.InfoContext(ctx, "inbound connection from ", source)
 	w.logger.InfoContext(ctx, "inbound connection to ", metadata.Destination)
 	w.router.RouteConnectionEx(ctx, conn, metadata, onClose)
+}
+
+func (e *Endpoint) PreMatchFlow(network string, destination netip.Addr) adapter.PreMatchAction {
+	return adapter.PreMatchFlow
+}
+
+func (e *Endpoint) JudgeFlow(network uint8, source netip.AddrPort, destination netip.AddrPort, firstPacket []byte) tun.FlowVerdict {
+	for _, localPrefix := range e.address {
+		if localPrefix.Contains(destination.Addr()) {
+			return tun.FlowVerdict{Action: tun.ActionAccept}
+		}
+	}
+	return adapter.JudgeFlow(e.router, e.Tag(), e.Type(), network, source, destination, firstPacket)
+}
+
+func (e *Endpoint) NewDNSPacket(payload []byte, source M.Socksaddr, destination M.Socksaddr, writer N.PacketWriter) {
+	ctx := log.ContextWithNewID(e.ctx)
+	var metadata adapter.InboundContext
+	metadata.Inbound = e.Tag()
+	metadata.InboundType = e.Type()
+	metadata.Network = N.NetworkUDP
+	metadata.Source = source
+	metadata.Destination = destination
+	metadata.Protocol = constant.ProtocolDNS
+	e.logger.InfoContext(ctx, "inbound DNS packet from ", source)
+	e.router.HijackDNSPacket(ctx, payload, writer, metadata)
+}
+
+func (e *Endpoint) PreferredDomain(metadata *adapter.InboundContext, domain string) bool {
+	return false
+}
+
+func (e *Endpoint) PreferredAddress(metadata *adapter.InboundContext, address netip.Addr) bool {
+	if !e.Device.Started() {
+		return false
+	}
+	return e.Device.Lookup(address) != nil
+}
+
+func (e *Endpoint) ListenPacketWithDestination(ctx context.Context, destination M.Socksaddr) (net.PacketConn, netip.Addr, error) {
+	e.logger.InfoContext(ctx, "outbound packet connection to ", destination)
+	if destination.IsFqdn() {
+		destinationAddresses, err := e.dnsRouter.Lookup(ctx, destination.Fqdn, adapter.DNSQueryOptions{})
+		if err != nil {
+			return nil, netip.Addr{}, err
+		}
+		return N.ListenSerial(ctx, e.Device, destination, destinationAddresses)
+	}
+	packetConn, err := e.Device.ListenPacket(ctx, destination)
+	if err != nil {
+		return nil, netip.Addr{}, err
+	}
+	if destination.IsIP() {
+		return packetConn, destination.Addr, nil
+	}
+	return packetConn, netip.Addr{}, nil
 }
