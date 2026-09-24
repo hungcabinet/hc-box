@@ -1,38 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "== Android overlay reverse patch =="
+echo "== Android overlay reverse (assets only) =="
 
-# ======================
-# Настройки
-# ======================
 ANDROID_DIR="clients/android"
-OVERLAY_DIR="${OVERLAY_DIR:-patches/hungcabinet/android/overlay}"
+PATCH_ROOT="${PATCH_ROOT:-patches/hungcabinet/android}"
+OVERLAY_DIR="${OVERLAY_DIR:-$PATCH_ROOT/overlay}"
 
-echo "Overlay target: $OVERLAY_DIR"
 echo "Source: $ANDROID_DIR"
-
-# ======================
-# 1. Проверки
-# ======================
+echo "Overlay: $OVERLAY_DIR"
 
 if [ ! -d "$OVERLAY_DIR" ]; then
-  echo "❌ ERROR: Overlay directory not found!"
-  echo "   Expected path: $OVERLAY_DIR"
+  echo "ERROR: Overlay directory not found: $OVERLAY_DIR"
   exit 1
 fi
 
 if [ ! -d "$ANDROID_DIR" ]; then
-  echo "❌ ERROR: Android directory not found!"
-  echo "   Expected path: $ANDROID_DIR"
+  echo "ERROR: Android directory not found: $ANDROID_DIR"
   exit 1
 fi
-
-echo "Syncing overlay from repository state..."
-
-# ======================
-# 2. Копируем обратно только файлы, уже присутствующие в overlay
-# ======================
 
 copied=0
 missing=0
@@ -44,17 +30,20 @@ while IFS= read -r -d '' overlay_file; do
   if [ -f "$src" ]; then
     mkdir -p "$(dirname "$overlay_file")"
     cp -a "$src" "$overlay_file"
-    echo "  ← $rel"
+    echo "  <- $rel"
     copied=$((copied + 1))
   else
-    echo "  ⚠️  not found in repo: $rel"
+    echo "  WARNING: not found in repo: $rel"
     missing=$((missing + 1))
   fi
 done < <(find "$OVERLAY_DIR" -type f -print0)
 
-echo "✅ Reverse patch complete: $copied file(s) updated"
+echo "Reverse overlay complete: $copied file(s) updated"
 if [ "$missing" -gt 0 ]; then
-  echo "⚠️  $missing file(s) from overlay were not found in $ANDROID_DIR"
+  echo "WARNING: $missing overlay file(s) missing from $ANDROID_DIR"
 fi
 
+echo
+echo "Note: surgical code changes live in $PATCH_ROOT/patches/*.patch"
+echo "Regenerate them with: python $PATCH_ROOT/generate_patches.py"
 echo "== Done =="

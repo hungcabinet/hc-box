@@ -1,0 +1,11 @@
+--- a/app/build.gradle.kts
++++ b/app/build.gradle.kts
+@@ -68,7 +68,7 @@
+     }
+ 
+     defaultConfig {
+-        applicationId = "io.nekohasekai.sfa"
++        applicationId = "com.hungcabinet.box"
+         minSdk = 24
+         targetSdk = 37
+         versionCode = getVersionProps("VERSION_CODE").toInt()

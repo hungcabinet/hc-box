@@ -1,0 +1,11 @@
+--- a/app/src/main/java/io/nekohasekai/sfa/compose/screen/settings/SettingsScreen.kt
++++ b/app/src/main/java/io/nekohasekai/sfa/compose/screen/settings/SettingsScreen.kt
+@@ -328,7 +328,7 @@
+                         .clickable {
+                             val intent = android.content.Intent(android.content.Intent.ACTION_VIEW)
+                             intent.data =
+-                                android.net.Uri.parse("https://github.com/SagerNet/sing-box-for-android")
++                                android.net.Uri.parse("https://github.com/hungcabinet/hc-box")
+                             context.startActivity(intent)
+                         },
+                     colors =

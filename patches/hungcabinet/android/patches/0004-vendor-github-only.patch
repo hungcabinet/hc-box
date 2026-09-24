@@ -1,0 +1,11 @@
+--- a/app/src/other/java/io/nekohasekai/sfa/vendor/Vendor.kt
++++ b/app/src/other/java/io/nekohasekai/sfa/vendor/Vendor.kt
+@@ -97,7 +97,7 @@
+ 
+     override val hasCustomUpdate = true
+ 
+-    override val updateSources = listOf(UpdateSource.GITHUB, UpdateSource.FDROID)
++    override val updateSources = listOf(UpdateSource.GITHUB)
+ 
+     override fun checkUpdateAsync(): UpdateInfo? = when (UpdateSource.fromString(Settings.updateSource)) {
+         UpdateSource.FDROID -> checkFDroidUpdate(Application.application)

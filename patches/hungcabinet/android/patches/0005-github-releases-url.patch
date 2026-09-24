@@ -1,0 +1,11 @@
+--- a/app/src/github/java/io/nekohasekai/sfa/vendor/GitHubUpdateChecker.kt
++++ b/app/src/github/java/io/nekohasekai/sfa/vendor/GitHubUpdateChecker.kt
+@@ -14,7 +14,7 @@
+ 
+ class GitHubUpdateChecker : Closeable {
+     companion object {
+-        private const val RELEASES_URL = "https://api.github.com/repos/SagerNet/sing-box/releases"
++        private const val RELEASES_URL = "https://api.github.com/repos/hungcabinet/hc-box/releases"
+         private const val METADATA_FILENAME = "SFA-version-metadata.json"
+     }
+ 

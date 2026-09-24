@@ -1,0 +1,10 @@
+--- a/app/src/main/java/io/nekohasekai/sfa/compose/screen/settings/AppSettingsScreen.kt
++++ b/app/src/main/java/io/nekohasekai/sfa/compose/screen/settings/AppSettingsScreen.kt
+@@ -1387,7 +1387,6 @@
+ ) {
+     val sources = listOf(
+         "github" to stringResource(R.string.update_source_github),
+-        "fdroid" to stringResource(R.string.update_source_fdroid),
+     )
+ 
+     AlertDialog(
