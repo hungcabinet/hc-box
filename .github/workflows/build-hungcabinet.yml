@@ -611,7 +611,7 @@ jobs:
 
           # Create release notes
           cat > notes.md << 'EOF'
-          ## hc-box (sing-box fork with AWG 2.0 and mieru support)
+          ## hc-box (sing-box fork with AWG 3.1 and mieru support)
           EOF
 
           # Create release
